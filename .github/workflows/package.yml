@@ -78,10 +78,16 @@ jobs:
           echo '--- /etc/sudoers.d/mctop ---'
           sudo cat /etc/sudoers.d/mctop
 
-          # A rule sudo will not parse is worse than no rule at all.
-          sudo visudo -c
+          # Check our file by name. A bare `visudo -c` audits everything in
+          # /etc/sudoers.d, and the runner image ships its own file with
+          # permissions sudo complains about — someone else's problem.
+          sudo visudo -c -f /etc/sudoers.d/mctop
+
           test "$(sudo stat -c '%a %U:%G' /etc/sudoers.d/mctop)" = '440 root:root'
           sudo grep -q '^%mctop-admins ALL=(minecraft) NOPASSWD:.*jstat.*jcmd$' /etc/sudoers.d/mctop
+
+          # And the proof that matters: sudo still works with our file in place.
+          sudo -n true
 
       - name: Withdraw the rule again
         run: |
@@ -92,7 +98,7 @@ jobs:
             echo "the rule outlived the answer that asked for it" >&2
             exit 1
           fi
-          sudo visudo -c
+          sudo -n true
 
       - name: Purge, and check nothing is left behind
         run: |
@@ -106,7 +112,7 @@ jobs:
             echo "debconf answers survived the purge" >&2
             exit 1
           fi
-          sudo visudo -c
+          sudo -n true
 
       - uses: actions/upload-artifact@v7
         with:
