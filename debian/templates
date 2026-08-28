@@ -1,0 +1,48 @@
+Template: mctop/install-sudoers
+Type: boolean
+Default: false
+Description: Set up a sudoers rule so mctop can read the Java heap?
+ mctop reads heap occupancy with the JDK's jstat and jcmd. Those tools can only
+ attach to a JVM as the user that owns it: jstat reads a file the JVM creates
+ mode 0600, and jcmd attaches over a socket that checks the caller's user and
+ group. Belonging to the server user's group is not enough.
+ .
+ If mctop will run as a different account from the Minecraft server, a rule in
+ /etc/sudoers.d/mctop can let it invoke just those two tools as the server's
+ user, without granting anything else.
+ .
+ Declining is safe. Everything except the Java heap and garbage collector
+ panels still works, and you can add the rule later with
+ "sudo dpkg-reconfigure mctop".
+
+Template: mctop/server-user
+Type: string
+Default: minecraft
+Description: User account that runs the Minecraft server:
+ The rule will allow the JDK tools to be run as this user. It is the account
+ named by User= in the server's systemd unit, and the owner of the server's
+ java process.
+
+Template: mctop/admin-user
+Type: string
+Description: Account that will run mctop:
+ The rule will be granted to this account. Give a user name, or a group name
+ prefixed with a percent sign, such as %minecraft-admins.
+ .
+ Leaving this empty skips the rule.
+
+Template: mctop/tools-not-found
+Type: error
+Description: JDK tools not found
+ jstat and jcmd could not be found, and a sudoers rule has to name them by
+ absolute path. No rule has been written.
+ .
+ Install a JDK — default-jdk-headless will do — and then run
+ "sudo dpkg-reconfigure mctop" to try again.
+
+Template: mctop/sudoers-invalid
+Type: error
+Description: The sudoers rule was rejected
+ visudo refused the generated rule, so it has not been installed. This is a
+ bug in mctop's packaging; please report it. Nothing has been changed, and
+ sudo is unaffected.

@@ -1,0 +1,102 @@
+#!/bin/sh
+# Write /etc/sudoers.d/mctop from the answers given to debian/config.
+#
+# The file is generated, not a conffile: it is rewritten on every reconfigure
+# and removed when the package is. Nothing is installed until visudo has
+# accepted it, because a malformed file in sudoers.d breaks sudo for everyone.
+set -e
+
+. /usr/share/debconf/confmodule
+
+SUDOERS="${DPKG_ROOT:-}/etc/sudoers.d/mctop"
+
+# Absolute paths for the two tools, since sudoers cannot search PATH.
+find_tool() {
+    tool="$1"
+
+    found=$(command -v "$tool" 2>/dev/null || true)
+    if [ -n "$found" ]; then
+        printf '%s\n' "$found"
+        return 0
+    fi
+
+    # Debian's JDKs live here and are not always on root's PATH.
+    for candidate in "${DPKG_ROOT:-}"/usr/lib/jvm/*/bin/"$tool"; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+write_sudoers() {
+    server_user="$1"
+    admin="$2"
+    jstat="$3"
+    jcmd="$4"
+
+    # Write beside the target so the final move cannot cross a filesystem.
+    tmp="${SUDOERS}.dpkg-new"
+    umask 077
+    cat > "$tmp" <<RULE
+# Installed by the mctop package. Regenerate with:
+#     sudo dpkg-reconfigure mctop
+#
+# Lets $admin run only the JDK's heap-reading tools as $server_user, which is
+# what mctop needs to read the server's Java heap. It grants nothing else.
+$admin ALL=($server_user) NOPASSWD: $jstat, $jcmd
+RULE
+    chmod 0440 "$tmp"
+    chown root:root "$tmp" 2>/dev/null || true
+
+    # -c checks, -f names the file to check. Never install an unchecked one.
+    if visudo -c -f "$tmp" >/dev/null 2>&1; then
+        mv "$tmp" "$SUDOERS"
+        echo "mctop: wrote $SUDOERS"
+        echo "mctop: set jstat and jcmd in your config to run through sudo, e.g."
+        echo "mctop:   jstat = [\"sudo\", \"-n\", \"-u\", \"$server_user\", \"$jstat\"]"
+        return 0
+    fi
+
+    rm -f "$tmp"
+    return 1
+}
+
+case "$1" in
+    configure)
+        db_get mctop/install-sudoers
+        if [ "$RET" != true ]; then
+            # An admin who has changed their mind should not be left with a
+            # rule they just declined.
+            rm -f "$SUDOERS"
+        else
+            db_get mctop/server-user
+            server_user="$RET"
+            db_get mctop/admin-user
+            admin="$RET"
+
+            if [ -z "$server_user" ] || [ -z "$admin" ]; then
+                echo "mctop: no accounts given, so no sudoers rule was written" >&2
+            elif ! jstat=$(find_tool jstat) || ! jcmd=$(find_tool jcmd); then
+                db_input critical mctop/tools-not-found || true
+                db_go || true
+            elif ! write_sudoers "$server_user" "$admin" "$jstat" "$jcmd"; then
+                db_input critical mctop/sudoers-invalid || true
+                db_go || true
+            fi
+        fi
+        ;;
+
+    abort-upgrade | abort-remove | abort-deconfigure) ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

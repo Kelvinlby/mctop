@@ -1,0 +1,84 @@
+# mctop configuration.
+#
+# Every key below is optional and shown with its built-in default. Delete what
+# you do not need. Command-line flags override this file, and the environment
+# variable MCTOP_RCON_PASSWORD overrides both for the password.
+
+[server]
+# Label shown in the header. Defaults to the RCON address.
+# name = "Survival"
+# Server working directory. When set, mctop discovers world folders under it,
+# so the [[world]] entries below become unnecessary.
+# directory = "/srv/minecraft"
+
+[rcon]
+# Enable RCON in server.properties: enable-rcon=true, rcon.port, rcon.password.
+address = "127.0.0.1:25575"
+# Prefer MCTOP_RCON_PASSWORD or password_file over an inline password.
+# password = "hunter2"
+# password_file = "/etc/mctop/rcon.password"
+connect_timeout_ms = 5000
+command_timeout_ms = 5000
+reconnect_delay_ms = 5000
+
+# How often each collector runs. They are independent, so a slow disk scan
+# never holds back the TPS graph.
+[refresh]
+tick_ms = 1000     # TPS and MSPT
+region_ms = 2000   # per-region detail
+roster_ms = 5000   # player list and version
+process_ms = 2000  # CPU, memory, heap
+disk_secs = 120    # world sizes; this one walks the disk
+draw_ms = 250      # screen redraw
+
+# The console commands each metric is read from. Point these elsewhere if your
+# fork words its output differently, or to use Spark: tps = "spark tps".
+[commands]
+tps = "tps"
+mspt = "mspt"
+regions = "tps"    # on Folia the region breakdown comes from the tps report
+players = "list"
+version = "version"
+
+# The local JVM to sample for CPU and memory. Turn this off when mctop runs on
+# a different machine than the server.
+[process]
+enabled = true
+# pid = 1234
+match_pattern = "(?i)folia|paper|purpur|spigot|craftbukkit|server\\.jar|minecraft"
+
+# Heap readings come from the JDK's own tools. jstat reads a file the JVM
+# creates mode 0600, and jcmd attaches over a socket that checks the caller's
+# user, so both must run as the user that owns the server process — sharing its
+# group is not enough.
+#
+# If mctop runs as someone else, put a wrapper in front of the tools rather than
+# running the whole dashboard as the server's user. This needs a sudoers rule
+# with NOPASSWD, since mctop cannot answer a password prompt:
+#
+#   jstat = ["sudo", "-n", "-u", "minecraft", "jstat"]
+#   jcmd  = ["sudo", "-n", "-u", "minecraft", "jcmd"]
+[jvm]
+enabled = true
+jcmd = "jcmd"
+jstat = "jstat"
+# When no collection has been seen recently, the heap low-water mark over this
+# window stands in for the after-collection occupancy.
+heap_after_gc_window_secs = 300
+
+[ui]
+history = 480     # samples kept for the charts
+log_lines = 500   # rows of scrollback in the Console tab
+tps_good = 19.5   # at or above this, TPS is drawn green
+tps_warn = 18.0   # at or above this, amber; below, red
+mspt_good = 25.0  # at or below this, MSPT is drawn green
+mspt_warn = 40.0  # at or below this, amber; above, red
+rounded_borders = true
+
+# World folders to measure on disk. Omit these if [server].directory is set.
+# [[world]]
+# name = "overworld"
+# path = "/srv/minecraft/world"
+#
+# [[world]]
+# path = "/srv/minecraft/world_nether"

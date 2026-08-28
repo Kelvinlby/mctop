@@ -1,0 +1,41 @@
+#!/bin/sh
+# Ask, before anything is unpacked, whether to set up the sudoers rule.
+#
+# A state machine rather than a straight run of db_input, so that the back
+# button in the dialog frontend works the way people expect it to.
+set -e
+
+. /usr/share/debconf/confmodule
+
+STATE=1
+while [ "$STATE" -ge 1 ] && [ "$STATE" -le 3 ]; do
+    case "$STATE" in
+        1)
+            db_input high mctop/install-sudoers || true
+            ;;
+        2)
+            db_get mctop/install-sudoers
+            if [ "$RET" != true ]; then
+                # Nothing more to ask; skip past the remaining questions.
+                STATE=3
+                continue
+            fi
+            db_input high mctop/server-user || true
+            ;;
+        3)
+            db_get mctop/install-sudoers
+            if [ "$RET" != true ]; then
+                break
+            fi
+            db_input high mctop/admin-user || true
+            ;;
+    esac
+
+    if db_go; then
+        STATE=$((STATE + 1))
+    else
+        STATE=$((STATE - 1))
+    fi
+done
+
+exit 0

@@ -1,0 +1,22 @@
+#!/bin/sh
+# The sudoers rule is generated, so it is ours to take away again. Leaving a
+# privilege grant behind after the package that asked for it is gone would be
+# a nasty surprise.
+set -e
+
+SUDOERS="${DPKG_ROOT:-}/etc/sudoers.d/mctop"
+
+case "$1" in
+    remove | purge)
+        rm -f "$SUDOERS"
+        ;;
+esac
+
+if [ "$1" = purge ] && [ -e /usr/share/debconf/confmodule ]; then
+    . /usr/share/debconf/confmodule
+    db_purge
+fi
+
+#DEBHELPER#
+
+exit 0

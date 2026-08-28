@@ -1,0 +1,116 @@
+name: Package
+
+# Every push, so there is always a .deb to hand for the current branch.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A branch that is pushed twice in quick succession only needs the newer build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  deb:
+    name: Build and verify the .deb
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # A prebuilt binary; building cargo-deb from source costs a minute or two.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Build
+        run: cargo deb
+
+      - name: Locate the package
+        id: package
+        run: |
+          path=$(ls target/debian/*.deb)
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$path" .deb)" >> "$GITHUB_OUTPUT"
+
+      - name: Show what is in it
+        run: |
+          dpkg-deb -I '${{ steps.package.outputs.path }}'
+          dpkg-deb -c '${{ steps.package.outputs.path }}'
+
+      # The maintainer scripts are the part most likely to break, and the part
+      # least likely to be noticed until someone installs the package. So the
+      # package is installed here, put through its debconf conversation, and
+      # purged again.
+      - name: Install it, declining the sudoers rule
+        run: |
+          sudo -E apt-get update
+          sudo -E apt-get install -y '${{ github.workspace }}/${{ steps.package.outputs.path }}'
+
+          test -x /usr/bin/mctop
+          mctop --version
+          mctop config path
+
+          if [ -e /etc/sudoers.d/mctop ]; then
+            echo "a rule was written despite being declined" >&2
+            exit 1
+          fi
+
+      - name: Ask for the sudoers rule
+        run: |
+          echo 'mctop mctop/install-sudoers boolean true' | sudo debconf-set-selections
+          echo 'mctop mctop/server-user string minecraft' | sudo debconf-set-selections
+          echo 'mctop mctop/admin-user string %mctop-admins' | sudo debconf-set-selections
+          sudo -E dpkg-reconfigure -f noninteractive mctop
+
+          echo '--- /etc/sudoers.d/mctop ---'
+          sudo cat /etc/sudoers.d/mctop
+
+          # A rule sudo will not parse is worse than no rule at all.
+          sudo visudo -c
+          test "$(sudo stat -c '%a %U:%G' /etc/sudoers.d/mctop)" = '440 root:root'
+          sudo grep -q '^%mctop-admins ALL=(minecraft) NOPASSWD:.*jstat.*jcmd$' /etc/sudoers.d/mctop
+
+      - name: Withdraw the rule again
+        run: |
+          echo 'mctop mctop/install-sudoers boolean false' | sudo debconf-set-selections
+          sudo -E dpkg-reconfigure -f noninteractive mctop
+
+          if [ -e /etc/sudoers.d/mctop ]; then
+            echo "the rule outlived the answer that asked for it" >&2
+            exit 1
+          fi
+          sudo visudo -c
+
+      - name: Purge, and check nothing is left behind
+        run: |
+          echo 'mctop mctop/install-sudoers boolean true' | sudo debconf-set-selections
+          sudo -E dpkg-reconfigure -f noninteractive mctop
+          sudo -E apt-get purge -y mctop
+
+          test ! -e /usr/bin/mctop
+          test ! -e /etc/sudoers.d/mctop
+          if sudo debconf-show mctop 2>/dev/null | grep -q install-sudoers; then
+            echo "debconf answers survived the purge" >&2
+            exit 1
+          fi
+          sudo visudo -c
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.name }}-${{ github.sha }}
+          path: target/debian/*.deb
+          if-no-files-found: error
+          retention-days: 7

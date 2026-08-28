@@ -1,0 +1,56 @@
+[package]
+name = "mctop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Terminal dashboard for Folia and Paper Minecraft servers"
+readme = "README.md"
+repository = "https://github.com/Kelvinlby/mctop"
+license = "GPL-3.0-or-later"
+keywords = ["minecraft", "folia", "monitor", "tui", "rcon"]
+categories = ["command-line-utilities", "visualization"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+ratatui = "0.30"
+rcon = { version = "0.6", features = ["rt-tokio"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+sysinfo = "0.39"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "process", "fs", "signal"] }
+toml = "0.9"
+
+# Debian packaging. `cargo deb` reads this; the maintainer scripts in debian/
+# add the debconf conversation that offers to write the sudoers rule.
+[package.metadata.deb]
+maintainer = "Kelvin <kelvinlby123@gmail.com>"
+copyright = "Copyright the mctop authors. Licensed GPL-3.0-or-later."
+license-file = ["LICENSE", "0"]
+section = "admin"
+priority = "optional"
+extended-description = """\
+A terminal dashboard for Folia and Paper Minecraft servers. Reads tick rate, \
+tick times, the player list and — on Folia — the per-region breakdown over \
+RCON, and samples CPU, memory, Java heap occupancy and world sizes from the \
+machine it runs on."""
+# $auto resolves the C library and any other shared-library dependencies.
+depends = "$auto, debconf (>= 0.5) | debconf-2.0"
+# Suggests, not Recommends: apt installs Recommends by default, and a host
+# running a Minecraft server already has a JDK. Pulling in a second one for the
+# heap panel — which explains itself when the tools are missing — would be a
+# couple of hundred megabytes nobody asked for.
+suggests = "default-jdk-headless, sudo"
+maintainer-scripts = "debian/"
+assets = [
+    # /usr/bin rather than /usr/local/bin, so it is on PATH with no setup.
+    ["target/release/mctop", "usr/bin/", "755"],
+    ["assets/config.toml", "usr/share/doc/mctop/examples/config.toml", "644"],
+    ["README.md", "usr/share/doc/mctop/README.md", "644"],
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
