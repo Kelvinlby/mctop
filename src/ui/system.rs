@@ -268,8 +268,40 @@ fn draw_collector(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if app.heap.young_collections.is_none() && app.heap.gc_seconds.is_none() {
-        widgets::placeholder(frame, inner, theme, "no collector statistics available");
+    if !app.heap.counters_available {
+        // An empty collector panel is nearly always this, and saying so beats
+        // leaving an operator to wonder whether something is broken.
+        let mut lines = vec![Line::default()];
+        if app.heap.perf_disabled {
+            lines.push(Line::styled(
+                "This JVM runs with -XX:+PerfDisableSharedMem.",
+                theme.value(),
+            ));
+            lines.push(Line::default());
+            lines.push(Line::styled(
+                "That flag switches off the file the collector's counters live in, so \
+                 collection counts and times cannot be read. It is part of Aikar's flags, \
+                 so most Minecraft servers run with it. Nothing is wrong.",
+                theme.label(),
+            ));
+            lines.push(Line::default());
+            lines.push(Line::styled(
+                "Heap occupancy above comes from jcmd instead, which is unaffected.",
+                theme.label(),
+            ));
+        } else {
+            lines.push(Line::styled(
+                "No collector statistics available.",
+                theme.value(),
+            ));
+            lines.push(Line::default());
+            lines.push(Line::styled(
+                "The counts and times come from jstat. Heap occupancy above is being read \
+                 with jcmd, which does not report them.",
+                theme.label(),
+            ));
+        }
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
         return;
     }
 

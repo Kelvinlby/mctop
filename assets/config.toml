@@ -47,10 +47,16 @@ enabled = true
 # pid = 1234
 match_pattern = "(?i)folia|paper|purpur|spigot|craftbukkit|server\\.jar|minecraft"
 
-# Heap readings come from the JDK's own tools. jstat reads a file the JVM
-# creates mode 0600, and jcmd attaches over a socket that checks the caller's
-# user, so both must run as the user that owns the server process — sharing its
-# group is not enough.
+# Heap readings come from the JDK's own tools. jstat is tried first: it is cheap
+# and it carries the collector's counters. But -XX:+PerfDisableSharedMem — part
+# of Aikar's flags, so part of most Minecraft servers' startup line — switches
+# off the file jstat reads, and then only jcmd can answer. jcmd reports no
+# counters, so the collector panel says why it is empty and the heap figures
+# carry on regardless.
+#
+# Both tools must run as the user that owns the server process: jstat reads a
+# file the JVM creates mode 0600, and jcmd attaches over a socket that checks
+# the caller's user. Sharing the server user's group is not enough.
 #
 # If mctop runs as someone else, put a wrapper in front of the tools rather than
 # running the whole dashboard as the server's user. This needs a sudoers rule

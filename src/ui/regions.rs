@@ -233,9 +233,14 @@ fn draw_detail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         ),
         widgets::field(
             "Block position",
-            // A chunk is sixteen blocks square; operators think in blocks when
-            // they go to look at the problem.
-            format::optional(region.chunk, |(x, z)| format!("{}, {}", x * 16, z * 16)),
+            format::optional(
+                region.block.or_else(|| {
+                    // A chunk is sixteen blocks square; operators think in blocks
+                    // when they go to look at the problem.
+                    region.chunk.map(|(x, z)| (x * 16, z * 16))
+                }),
+                |(x, z)| format!("{x}, {z}"),
+            ),
             width,
             theme,
             Health::Unknown,

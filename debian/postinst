@@ -55,7 +55,8 @@ RULE
     if visudo -c -f "$tmp" >/dev/null 2>&1; then
         mv "$tmp" "$SUDOERS"
         echo "mctop: wrote $SUDOERS"
-        echo "mctop: set jstat and jcmd in your config to run through sudo, e.g."
+        echo "mctop: point both tools at sudo in the [jvm] section of your config:"
+        echo "mctop:   jcmd  = [\"sudo\", \"-n\", \"-u\", \"$server_user\", \"$jcmd\"]"
         echo "mctop:   jstat = [\"sudo\", \"-n\", \"-u\", \"$server_user\", \"$jstat\"]"
         return 0
     fi

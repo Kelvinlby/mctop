@@ -85,7 +85,28 @@ fn label_values(labels: Option<Vec<String>>, values: Vec<f64>) -> Vec<(String, f
 /// and Folia's longer report, where the headline rate sits among per-region
 /// detail. Values above 20 are kept as reported; some forks overshoot slightly.
 pub fn parse_tps(raw: &str) -> TpsReading {
+    static REGION_SUMMARY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(lowest|median|highest)\s+region\s+tps\s*:\s*(-?\d+(?:\.\d+)?)").unwrap()
+    });
+
     let text = strip_formatting(raw);
+
+    // Folia's health report describes the distribution across its regions
+    // instead of temporal windows. Read those named values before the generic
+    // line parser, which deliberately ignores per-region detail.
+    let region_summary: Vec<(String, f64)> = REGION_SUMMARY
+        .captures_iter(&text)
+        .filter_map(|captures| {
+            let label = captures.get(1)?.as_str().to_ascii_lowercase();
+            let value = captures.get(2)?.as_str().parse::<f64>().ok()?;
+            value.is_finite().then_some((label, value))
+        })
+        .collect();
+    if !region_summary.is_empty() {
+        return TpsReading {
+            windows: region_summary,
+        };
+    }
 
     for line in text.lines() {
         if !line.to_ascii_lowercase().contains("tps") {
@@ -233,6 +254,12 @@ pub fn parse_regions(raw: &str) -> RegionReport {
 fn parse_region_block(block: &str) -> Option<Region> {
     static COORDS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)").unwrap());
+    static BLOCK_POSITION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?i)\bblock\s*\[\s*w\s*:\s*['\"]?([^,'\"\]\s]+)['\"]?\s*,\s*(-?\d+)\s*,\s*-?\d+\s*,\s*(-?\d+)\s*\]"#,
+        )
+        .unwrap()
+    });
     static WORLD_KEYED: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"(?i)\bworld\s*[:=]\s*"?([^",\s\]\)]+)"#).unwrap());
     static WORLD_BARE: LazyLock<Regex> = LazyLock::new(|| {
@@ -240,16 +267,27 @@ fn parse_region_block(block: &str) -> Option<Region> {
             .unwrap()
     });
 
+    let block_position = BLOCK_POSITION.captures(block);
     let mut region = Region {
-        world: WORLD_KEYED
-            .captures(block)
-            .or_else(|| WORLD_BARE.captures(block))
+        world: block_position
+            .as_ref()
             .and_then(|captures| captures.get(1))
+            .or_else(|| {
+                WORLD_KEYED
+                    .captures(block)
+                    .or_else(|| WORLD_BARE.captures(block))
+                    .and_then(|captures| captures.get(1))
+            })
             .map(|found| found.as_str().to_owned())
             .filter(|world| !is_metric_word(world)),
         chunk: COORDS.captures(block).and_then(|captures| {
             let x = captures.get(1)?.as_str().parse().ok()?;
             let z = captures.get(2)?.as_str().parse().ok()?;
+            Some((x, z))
+        }),
+        block: block_position.as_ref().and_then(|captures| {
+            let x = captures.get(2)?.as_str().parse().ok()?;
+            let z = captures.get(3)?.as_str().parse().ok()?;
             Some((x, z))
         }),
         ..Region::default()
@@ -276,7 +314,7 @@ fn parse_region_block(block: &str) -> Option<Region> {
         || region.entities.is_some()
         || region.chunks.is_some();
 
-    (has_data || region.chunk.is_some()).then_some(region)
+    (has_data || region.chunk.is_some() || region.block.is_some()).then_some(region)
 }
 
 /// A word that names a metric is never a world name.
@@ -296,12 +334,14 @@ fn is_metric_word(word: &str) -> bool {
         .any(|metric| metric.eq_ignore_ascii_case(word))
 }
 
-/// The first number following `label` in `block`, wherever it appears.
+/// The first number next to `label` in `block`, accepting both `TPS 20.0` and
+/// the prose form `20.0 TPS` used by Folia's health report.
 fn field(block: &str, label: &str) -> Option<f64> {
-    let pattern = format!(r"{label}\s*[:=]?\s*(-?\d+(?:\.\d+)?)");
-    let regex = Regex::new(&pattern).ok()?;
-    regex
-        .captures(block)?
+    let after = Regex::new(&format!(r"{label}\s*[:=]?\s*(-?\d+(?:\.\d+)?)")).ok()?;
+    let before = Regex::new(&format!(r"(-?\d+(?:\.\d+)?)\s*%?\s*{label}\b")).ok()?;
+    after
+        .captures(block)
+        .or_else(|| before.captures(block))?
         .get(1)?
         .as_str()
         .parse::<f64>()
@@ -407,6 +447,28 @@ mod tests {
         assert_eq!(tps.windows.len(), 5);
         assert_eq!(tps.windows[0], ("5s".to_string(), 20.0));
         assert_eq!(tps.current(), Some(20.0));
+    }
+
+    #[test]
+    fn reads_folia_health_report_tps_without_mistaking_region_metrics_for_windows() {
+        let raw = "\
+Server Health Report
+ - Utilisation: 3.0% / 100.0%
+ - Lowest Region TPS: 20.00
+ - Median Region TPS: 20.00
+ - Highest Region TPS: 20.00
+Highest 3 utilisation regions
+ - Region around block [w:'world',-441,80,-4025]:
+    3.0% util at 1.49 MSPT at 20.00 TPS";
+
+        assert_eq!(
+            parse_tps(raw).windows,
+            vec![
+                ("lowest".to_string(), 20.0),
+                ("median".to_string(), 20.0),
+                ("highest".to_string(), 20.0),
+            ]
+        );
     }
 
     #[test]
@@ -530,6 +592,33 @@ Region [world_nether, (4, 4)]:
             report.worst().unwrap().world.as_deref(),
             Some("world_nether")
         );
+    }
+
+    #[test]
+    fn reads_folia_region_around_a_block_position() {
+        let raw = "\
+Server Health Report
+ - Total regions: 1
+Highest 3 utilisation regions
+ - Region around block [w:'world',-441,80,-4025]:
+    2.9% util at 1.47 MSPT at 20.00 TPS
+    Chunks: 841 Players: 1 Entities: 479";
+
+        let report = parse_regions(raw);
+        assert_eq!(report.total, Some(1));
+        assert_eq!(report.regions.len(), 1);
+
+        let region = &report.regions[0];
+        assert_eq!(region.world.as_deref(), Some("world"));
+        assert_eq!(region.chunk, None);
+        assert_eq!(region.block, Some((-441, -4025)));
+        assert_eq!(region.label(), "world (-441, -4025)");
+        assert_eq!(region.tps, Some(20.0));
+        assert_eq!(region.mspt, Some(1.47));
+        assert_eq!(region.players, Some(1));
+        assert_eq!(region.entities, Some(479));
+        assert_eq!(region.chunks, Some(841));
+        assert!((region.utilisation.unwrap() - 0.029).abs() < 1e-9);
     }
 
     #[test]

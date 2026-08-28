@@ -52,6 +52,24 @@ fn main() {
         print(terminal.backend());
     }
 
+    // The case an operator running Aikar's flags sees: heap read by jcmd, but
+    // no collector counters, because the perf file is switched off.
+    app.tab = Tab::System;
+    app.heap.counters_available = false;
+    app.heap.perf_disabled = true;
+    app.heap.young_collections = None;
+    app.heap.full_collections = None;
+    app.heap.gc_seconds = None;
+    app.heap.gc_load = None;
+    {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| ui::draw(frame, &mut app, &theme))
+            .unwrap();
+        println!("\n===== System with -XX:+PerfDisableSharedMem =====");
+        print(terminal.backend());
+    }
+
     // The case where the process is found but the JDK tools are refused, which
     // is what an operator sees when mctop runs as a different user.
     app.heap = Default::default();
@@ -172,6 +190,8 @@ fn seed(app: &mut App) {
                 gc_seconds: Some(412.6),
                 gc_load: Some(0.021),
                 non_heap: Some(412_000_000),
+                counters_available: true,
+                perf_disabled: false,
             }),
         });
     }
@@ -187,6 +207,7 @@ fn seed(app: &mut App) {
         .map(|i| Region {
             world: Some(worlds[i % 3].into()),
             chunk: Some(((i as i64 - 12) * 37, (i as i64 * 19) - 90)),
+            block: None,
             tps: Some(20.0 - (i as f64) * 0.31),
             mspt: Some(2.0 + (i as f64) * 2.4),
             utilisation: Some(0.03 + (i as f64) * 0.042),

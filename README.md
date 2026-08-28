@@ -27,7 +27,7 @@ breakdown that a global average hides.
 | Per-region tick rate, tick time, and load | the Folia region report over RCON |
 | Players online, server flavour and version | `/list` and `/version` over RCON |
 | CPU use, resident memory, thread count, uptime | the local JVM process |
-| Heap occupancy **after garbage collection**, and collector load | `jstat` and `jcmd` |
+| Heap occupancy **after garbage collection**, and collector load | `jcmd`, or `jstat` where the JVM allows it |
 | World sizes on disk, broken down by `region/`, `entities/`, `poi/` | the local filesystem |
 | Free space on the filesystem holding the worlds | the local filesystem |
 
@@ -144,7 +144,18 @@ read from the local machine — the game has no idea how much CPU it is using, s
 no amount of RCON will produce those. Over RCON alone the tick and region
 metrics still work; the System tab says why the rest is missing.
 
-### Reading the heap when mctop runs as a different user
+### Reading the heap
+
+Occupancy comes from `jcmd GC.heap_info`, which asks the JVM over its attach
+socket. mctop tries `jstat` first, because it is cheaper and it also carries the
+collector's counters — how many collections, and how long they took — but
+`-XX:+PerfDisableSharedMem` switches off the file `jstat` reads. That flag is
+part of [Aikar's flags](https://docs.papermc.io/paper/aikars-flags), so most
+Minecraft servers run with it, and on those servers `jstat` can never work no
+matter who runs it. mctop falls back to `jcmd` and the System tab says why the
+garbage collector panel is empty. Everything else is unaffected.
+
+### When mctop runs as a different user
 
 CPU, memory, and uptime come from `/proc` and work across accounts. The heap does
 not: `jstat` reads a file the JVM creates mode `0600`, and `jcmd` attaches over a
@@ -163,8 +174,8 @@ The .deb offers to write this rule for you at install time; to do it by hand:
 
 ```toml
 [jvm]
-jstat = ["sudo", "-n", "-u", "minecraft", "jstat"]
 jcmd  = ["sudo", "-n", "-u", "minecraft", "jcmd"]
+jstat = ["sudo", "-n", "-u", "minecraft", "jstat"]
 ```
 
 with a sudoers rule to match. `-n` matters: mctop gives its children no stdin, so

@@ -139,6 +139,8 @@ pub struct Region {
     pub world: Option<String>,
     /// Centre chunk of the region, when the server reports it.
     pub chunk: Option<(i64, i64)>,
+    /// A representative block position, when the server reports one instead.
+    pub block: Option<(i64, i64)>,
     pub tps: Option<f64>,
     pub mspt: Option<f64>,
     /// Fraction of the tick budget consumed, 0.0 to 1.0 and occasionally above.
@@ -151,7 +153,8 @@ pub struct Region {
 impl Region {
     /// A stable label for tables and charts.
     pub fn label(&self) -> String {
-        match (&self.world, self.chunk) {
+        let coordinates = self.chunk.or(self.block);
+        match (&self.world, coordinates) {
             (Some(world), Some((x, z))) => format!("{world} ({x}, {z})"),
             (Some(world), None) => world.clone(),
             (None, Some((x, z))) => format!("({x}, {z})"),
@@ -255,6 +258,12 @@ pub struct HeapStats {
     pub gc_load: Option<f64>,
     /// Non-heap (metaspace and friends) usage in bytes.
     pub non_heap: Option<u64>,
+    /// Whether the collector's counters could be read. They live in the JVM's
+    /// perf file, so they go missing on a server whose flags switch it off.
+    pub counters_available: bool,
+    /// Whether the JVM runs with `-XX:+PerfDisableSharedMem`, which is why the
+    /// counters are missing when they are.
+    pub perf_disabled: bool,
 }
 
 impl HeapStats {
@@ -420,6 +429,13 @@ mod tests {
             ..Region::default()
         };
         assert_eq!(region.label(), "world (-12, 44)");
+
+        let region = Region {
+            world: Some("world_nether".into()),
+            block: Some((-441, -4025)),
+            ..Region::default()
+        };
+        assert_eq!(region.label(), "world_nether (-441, -4025)");
         assert_eq!(Region::default().label(), "region");
     }
 
