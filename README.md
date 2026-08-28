@@ -1,5 +1,7 @@
 # mctop
 
+[![Package](https://github.com/Kelvinlby/mctop/actions/workflows/package.yml/badge.svg)](https://github.com/Kelvinlby/mctop/actions/workflows/package.yml)
+
 A terminal dashboard for [Folia](https://papermc.io/software/folia) and Paper
 Minecraft servers. It watches the numbers that decide whether players are having
 a good time — tick rate, tick times, heap pressure, and on Folia the per-region

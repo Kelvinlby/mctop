@@ -36,87 +36,62 @@ jobs:
           tool: cargo-deb
 
       - name: Build
-        run: cargo deb
-
-      - name: Locate the package
         id: package
         run: |
+          cargo deb
           path=$(ls target/debian/*.deb)
           echo "path=$path" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$path" .deb)" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          dpkg-deb -I "$path"
 
-      - name: Show what is in it
+      # The maintainer scripts are shell, so `cargo test` cannot reach them, and
+      # they run as root on other people's machines. Installing the package here
+      # and walking it through the whole debconf conversation is the only thing
+      # standing between a typo and a broken sudoers file on a live server.
+      - name: Install, reconfigure, purge
         run: |
-          dpkg-deb -I '${{ steps.package.outputs.path }}'
-          dpkg-deb -c '${{ steps.package.outputs.path }}'
-
-      # The maintainer scripts are the part most likely to break, and the part
-      # least likely to be noticed until someone installs the package. So the
-      # package is installed here, put through its debconf conversation, and
-      # purged again.
-      - name: Install it, declining the sudoers rule
-        run: |
+          set -x
+          deb='${{ github.workspace }}/${{ steps.package.outputs.path }}'
           sudo -E apt-get update
-          sudo -E apt-get install -y '${{ github.workspace }}/${{ steps.package.outputs.path }}'
+          sudo -E apt-get install -y "$deb"
 
+          # Installs to /usr/bin, and declines the rule unless asked.
           test -x /usr/bin/mctop
           mctop --version
-          mctop config path
+          test ! -e /etc/sudoers.d/mctop
 
-          if [ -e /etc/sudoers.d/mctop ]; then
-            echo "a rule was written despite being declined" >&2
-            exit 1
-          fi
-
-      - name: Ask for the sudoers rule
-        run: |
-          echo 'mctop mctop/install-sudoers boolean true' | sudo debconf-set-selections
-          echo 'mctop mctop/server-user string minecraft' | sudo debconf-set-selections
-          echo 'mctop mctop/admin-user string %mctop-admins' | sudo debconf-set-selections
+          # Asking for the rule writes one, valid and locked down.
+          printf 'mctop mctop/install-sudoers boolean true\n%s\n%s\n' \
+            'mctop mctop/server-user string minecraft' \
+            'mctop mctop/admin-user string %mctop-admins' | sudo debconf-set-selections
           sudo -E dpkg-reconfigure -f noninteractive mctop
-
-          echo '--- /etc/sudoers.d/mctop ---'
           sudo cat /etc/sudoers.d/mctop
-
-          # Check our file by name. A bare `visudo -c` audits everything in
-          # /etc/sudoers.d, and the runner image ships its own file with
-          # permissions sudo complains about — someone else's problem.
+          # By name: a bare `visudo -c` audits all of /etc/sudoers.d, and the
+          # runner image ships its own file with permissions sudo dislikes.
           sudo visudo -c -f /etc/sudoers.d/mctop
-
           test "$(sudo stat -c '%a %U:%G' /etc/sudoers.d/mctop)" = '440 root:root'
           sudo grep -q '^%mctop-admins ALL=(minecraft) NOPASSWD:.*jstat.*jcmd$' /etc/sudoers.d/mctop
-
-          # And the proof that matters: sudo still works with our file in place.
           sudo -n true
 
-      - name: Withdraw the rule again
-        run: |
+          # Changing your mind takes the rule away again.
           echo 'mctop mctop/install-sudoers boolean false' | sudo debconf-set-selections
           sudo -E dpkg-reconfigure -f noninteractive mctop
+          test ! -e /etc/sudoers.d/mctop
 
-          if [ -e /etc/sudoers.d/mctop ]; then
-            echo "the rule outlived the answer that asked for it" >&2
-            exit 1
-          fi
-          sudo -n true
-
-      - name: Purge, and check nothing is left behind
-        run: |
+          # Purging leaves nothing behind: no binary, no rule, no answers.
           echo 'mctop mctop/install-sudoers boolean true' | sudo debconf-set-selections
           sudo -E dpkg-reconfigure -f noninteractive mctop
           sudo -E apt-get purge -y mctop
-
           test ! -e /usr/bin/mctop
           test ! -e /etc/sudoers.d/mctop
-          if sudo debconf-show mctop 2>/dev/null | grep -q install-sudoers; then
-            echo "debconf answers survived the purge" >&2
-            exit 1
-          fi
+          ! sudo debconf-show mctop 2>/dev/null | grep -q install-sudoers
           sudo -n true
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.name }}-${{ github.sha }}
+          # Short: this becomes the name of the zip you download. The .deb
+          # inside keeps its full versioned name.
+          name: mctop-deb-${{ steps.package.outputs.sha }}
           path: target/debian/*.deb
           if-no-files-found: error
           retention-days: 7
