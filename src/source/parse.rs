@@ -684,4 +684,29 @@ Highest 3 utilisation regions
         assert_eq!(identity.raw.as_deref(), Some("some custom build"));
         assert_eq!(identity.summary(), "unknown");
     }
+#[test]
+fn real_folia_health_report() {
+    let raw = r#"Server Health Report
+ - Online Players: 4
+ - Total regions: 12
+ - Utilisation: 45.3% / 800.0%
+ - Lowest Region TPS: 19.98
+ - Median Region TPS: 20.00
+ - Highest Region TPS: 20.00
+Highest 3 utilisation regions
+ - Region around block [w:'world',-441,80,-4025]:
+    3.0% util at 1.49 MSPT at 20.00 TPS
+    Chunks: 441 Players: 3 Entities: 120
+ - Region around block [w:'world',103,80,55]:
+    2.1% util at 1.10 MSPT at 20.00 TPS
+    Chunks: 200 Players: 1 Entities: 40
+ - Region around block [w:'world_nether',7,80,7]:
+    0.5% util at 0.30 MSPT at 20.00 TPS
+    Chunks: 90 Players: 0 Entities: 14"#;
+    let report = parse_regions(raw);
+    eprintln!("total={:?} threads={:?} n={}", report.total, report.threads, report.regions.len());
+    for r in &report.regions { eprintln!("{:?}", r); }
+    panic!("show output");
+}
+
 }
